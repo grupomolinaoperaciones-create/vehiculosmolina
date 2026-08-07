@@ -162,13 +162,266 @@ function Dashboard({vehiculos,mtto,combustible,viaticos}){
   </div>
 }
 
+/* ── Ficha de vehículo (historial completo imprimible) ── */
+function FichaVehiculo({vehiculo, mtto, combustible, viaticos, onClose}){
+  const [tab, setTab] = useState('mtto')
+
+  const vMtto = mtto.filter(m=>m.vehiculo_id===vehiculo.id).sort((a,b)=>b.fecha?.localeCompare(a.fecha))
+  const vComb = combustible.filter(c=>c.vehiculo_id===vehiculo.id).sort((a,b)=>b.fecha?.localeCompare(a.fecha))
+  const vViat = viaticos.filter(v=>v.vehiculo_id===vehiculo.id).sort((a,b)=>b.fecha?.localeCompare(a.fecha))
+
+  const totalMtto   = vMtto.reduce((s,m)=>s+(+m.mano_obra||0)+(+m.refacciones||0),0)
+  const totalMO     = vMtto.reduce((s,m)=>s+(+m.mano_obra||0),0)
+  const totalRef    = vMtto.reduce((s,m)=>s+(+m.refacciones||0),0)
+  const totalComb   = vComb.reduce((s,c)=>s+(+c.costo||0),0)
+  const totalLts    = vComb.reduce((s,c)=>s+(+c.litros||0),0)
+  const totalViat   = vViat.reduce((s,v)=>s+(+v.monto||0),0)
+  const totalGlobal = totalMtto + totalComb + totalViat
+
+  const eColor={Completado:'success','En proceso':'warning',Pendiente:'info',Cancelado:'danger'}
+  const tColor={Preventivo:'info',Correctivo:'warning',Emergencia:'danger'}
+
+  const exportCSV = () => {
+    const rows = [
+      ['Tipo','Fecha','Descripcion','Costo MO','Costo Ref','Total','Tecnico','Estado'],
+      ...vMtto.map(m=>[
+        'Mantenimiento', m.fecha, `"${m.descripcion}"`,
+        m.mano_obra||0, m.refacciones||0,
+        (+m.mano_obra||0)+(+m.refacciones||0),
+        m.tecnico||'', m.estado
+      ]),
+      [],
+      ['Tipo','Fecha','Litros','Costo','Combustible','Estacion','Operador'],
+      ...vComb.map(c=>[
+        'Combustible', c.fecha, c.litros||0, c.costo||0,
+        c.tipo_combustible||'', c.estacion||'', c.operador||''
+      ]),
+      [],
+      ['Tipo','Fecha','Tipo Gasto','Monto','Origen','Destino','Operador'],
+      ...vViat.map(v=>[
+        'Viatico/Caseta', v.fecha, v.tipo||'', v.monto||0,
+        v.origen||'', v.destino||'', v.operador||''
+      ]),
+      [],
+      ['RESUMEN'],
+      ['Mantenimientos (MO)', totalMO],
+      ['Mantenimientos (Refacciones)', totalRef],
+      ['Combustible', totalComb],
+      ['Viaticos/Casetas', totalViat],
+      ['TOTAL GENERAL', totalGlobal],
+    ]
+    const csv = rows.map(r=>r.join(',')).join('\n')
+    const blob = new Blob(['\uFEFF'+csv], {type:'text/csv;charset=utf-8'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `historial_${vehiculo.no_economico}_${new Date().toISOString().split('T')[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return (
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.55)',zIndex:1000,overflowY:'auto',padding:'20px 12px'}}>
+      <div style={{maxWidth:900,margin:'0 auto',background:'var(--bg2)',borderRadius:14,overflow:'hidden',boxShadow:'0 8px 40px rgba(0,0,0,0.22)'}}>
+
+        {/* Header */}
+        <div style={{background:'var(--bg)',padding:'20px 24px',borderBottom:'0.5px solid var(--border)'}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',flexWrap:'wrap',gap:12}}>
+            <div>
+              <div style={{display:'flex',gap:10,alignItems:'center',marginBottom:6}}>
+                <h2 style={{fontSize:20,fontWeight:700,margin:0}}>#{vehiculo.no_economico}</h2>
+                <Badge color={vehiculo.activo?'success':'gray'}>{vehiculo.activo?'Activo':'Inactivo'}</Badge>
+              </div>
+              <p style={{margin:'0 0 2px',fontSize:15,fontWeight:500}}>{vehiculo.nombre||`${vehiculo.marca} ${vehiculo.modelo}`}</p>
+              <p style={{margin:0,fontSize:13,color:'var(--text2)'}}>
+                {vehiculo.marca} {vehiculo.modelo} {vehiculo.año&&`· ${vehiculo.año}`}
+                {vehiculo.campo&&` · ${vehiculo.campo}`}
+                {vehiculo.chofer&&` · 👤 ${vehiculo.chofer}`}
+              </p>
+            </div>
+            <div className="no-print" style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+              <button onClick={()=>window.print()} style={{padding:'8px 16px',borderRadius:8,background:'#378ADD',color:'#fff',border:'none',fontSize:13,fontWeight:500,cursor:'pointer'}}>🖨️ Imprimir</button>
+              <button onClick={exportCSV} style={{padding:'8px 16px',borderRadius:8,background:'#1D9E75',color:'#fff',border:'none',fontSize:13,fontWeight:500,cursor:'pointer'}}>📥 Exportar CSV</button>
+              <button onClick={onClose} style={{padding:'8px 16px',borderRadius:8,background:'none',border:'0.5px solid var(--border2)',fontSize:13,cursor:'pointer',color:'var(--text2)'}}>✕ Cerrar</button>
+            </div>
+          </div>
+
+          {/* Totalizador */}
+          <div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:16}}>
+            <div style={{background:'#EAF3FB',borderRadius:8,padding:'10px 16px',flex:1,minWidth:120,textAlign:'center'}}>
+              <p style={{fontSize:11,color:'#185FA5',margin:'0 0 2px',fontWeight:500}}>Mantenimientos</p>
+              <p style={{fontSize:18,fontWeight:700,color:'#185FA5',margin:0}}>${totalMtto.toLocaleString()}</p>
+              <p style={{fontSize:10,color:'#378ADD',margin:0}}>{vMtto.length} registros</p>
+            </div>
+            <div style={{background:'#FAEDE7',borderRadius:8,padding:'10px 16px',flex:1,minWidth:120,textAlign:'center'}}>
+              <p style={{fontSize:11,color:'#A03A18',margin:'0 0 2px',fontWeight:500}}>Combustible</p>
+              <p style={{fontSize:18,fontWeight:700,color:'#D85A30',margin:0}}>${totalComb.toLocaleString()}</p>
+              <p style={{fontSize:10,color:'#D85A30',margin:0}}>{totalLts.toLocaleString()} lts · {vComb.length} cargas</p>
+            </div>
+            <div style={{background:'#EEEDFE',borderRadius:8,padding:'10px 16px',flex:1,minWidth:120,textAlign:'center'}}>
+              <p style={{fontSize:11,color:'#3C3489',margin:'0 0 2px',fontWeight:500}}>Viáticos/Casetas</p>
+              <p style={{fontSize:18,fontWeight:700,color:'#534AB7',margin:0}}>${totalViat.toLocaleString()}</p>
+              <p style={{fontSize:10,color:'#534AB7',margin:0}}>{vViat.length} registros</p>
+            </div>
+            <div style={{background:'#E1F5EE',borderRadius:8,padding:'10px 16px',flex:1,minWidth:120,textAlign:'center',border:'1.5px solid #1D9E75'}}>
+              <p style={{fontSize:11,color:'#0F6E56',margin:'0 0 2px',fontWeight:600}}>TOTAL GENERAL</p>
+              <p style={{fontSize:20,fontWeight:700,color:'#1D9E75',margin:0}}>${totalGlobal.toLocaleString()}</p>
+              <p style={{fontSize:10,color:'#1D9E75',margin:0}}>gasto acumulado</p>
+            </div>
+          </div>
+
+          {/* Sub-totales mantenimiento */}
+          {vMtto.length>0&&(
+            <div style={{display:'flex',gap:16,marginTop:10,fontSize:12,color:'var(--text2)'}}>
+              <span>Mano de obra: <strong style={{color:'#1D9E75'}}>${totalMO.toLocaleString()}</strong></span>
+              <span>Refacciones: <strong style={{color:'#D85A30'}}>${totalRef.toLocaleString()}</strong></span>
+            </div>
+          )}
+        </div>
+
+        {/* Tabs */}
+        <div className="no-print" style={{background:'var(--bg)',borderBottom:'0.5px solid var(--border)',display:'flex'}}>
+          {[
+            {id:'mtto',label:`🔧 Mantenimientos (${vMtto.length})`},
+            {id:'comb',label:`⛽ Combustible (${vComb.length})`},
+            {id:'viat',label:`🛣️ Viáticos (${vViat.length})`},
+          ].map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{
+              padding:'11px 18px',background:'none',border:'none',
+              borderBottom:tab===t.id?'2px solid #1D9E75':'2px solid transparent',
+              color:tab===t.id?'#0F6E56':'var(--text2)',
+              fontWeight:tab===t.id?600:400,fontSize:13,cursor:'pointer'
+            }}>{t.label}</button>
+          ))}
+        </div>
+
+        {/* Content */}
+        <div style={{padding:'20px 24px'}}>
+
+          {/* MANTENIMIENTOS */}
+          {tab==='mtto'&&(
+            <div>
+              {vMtto.length===0?<EmptyState msg="Sin mantenimientos registrados para este vehículo."/>:(
+                <div style={{display:'flex',flexDirection:'column',gap:10}}>
+                  {vMtto.map(m=>(
+                    <div key={m.id} style={{background:'var(--bg)',border:'0.5px solid var(--border)',borderRadius:10,padding:'12px 14px'}}>
+                      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:6,flexWrap:'wrap',gap:6}}>
+                        <div style={{display:'flex',gap:8,alignItems:'center',flexWrap:'wrap'}}>
+                          <Badge color={tColor[m.tipo]||'gray'}>{m.tipo}</Badge>
+                          <Badge color={eColor[m.estado]||'gray'}>{m.estado}</Badge>
+                          <span style={{fontSize:12,color:'var(--text3)'}}>{m.fecha}</span>
+                          {m.kilometraje&&<span style={{fontSize:11,color:'var(--text3)'}}>🔢 {Number(m.kilometraje).toLocaleString()} km</span>}
+                        </div>
+                        <strong style={{color:'#378ADD',fontSize:14}}>${((+m.mano_obra||0)+(+m.refacciones||0)).toLocaleString()}</strong>
+                      </div>
+                      <p style={{margin:'0 0 4px',fontSize:13,fontWeight:500}}>{m.descripcion}</p>
+                      {m.observaciones&&<p style={{margin:'0 0 6px',fontSize:12,color:'var(--text2)'}}>{m.observaciones}</p>}
+                      <div style={{display:'flex',gap:14,fontSize:12,color:'var(--text2)',flexWrap:'wrap'}}>
+                        {m.tecnico&&<span>🔧 {m.tecnico}</span>}
+                        <span>💵 M.O.: <strong style={{color:'#1D9E75'}}>${Number(m.mano_obra||0).toLocaleString()}</strong></span>
+                        <span>🔩 Ref.: <strong style={{color:'#D85A30'}}>${Number(m.refacciones||0).toLocaleString()}</strong></span>
+                      </div>
+                      {m.fotos?.length>0&&(
+                        <div style={{display:'flex',gap:6,marginTop:8,flexWrap:'wrap'}}>
+                          {m.fotos.map((url,i)=><img key={i} src={url} alt="" style={{width:64,height:50,objectFit:'cover',borderRadius:5,border:'0.5px solid var(--border)'}}/>)}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* COMBUSTIBLE */}
+          {tab==='comb'&&(
+            <div>
+              {vComb.length===0?<EmptyState msg="Sin registros de combustible."/>:(
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                    <thead>
+                      <tr style={{borderBottom:'0.5px solid var(--border)'}}>
+                        {['Fecha','Combustible','Litros','Costo','$/Lt','Kilom.','Estación','Operador'].map(h=>(
+                          <th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',fontSize:12,whiteSpace:'nowrap'}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vComb.map(c=>(
+                        <tr key={c.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+                          <td style={{padding:'8px 10px',whiteSpace:'nowrap'}}>{c.fecha}</td>
+                          <td style={{padding:'8px 10px'}}>{c.tipo_combustible}</td>
+                          <td style={{padding:'8px 10px',fontWeight:600,color:'#D85A30'}}>{c.litros} lts</td>
+                          <td style={{padding:'8px 10px',color:'#1D9E75',fontWeight:600}}>{c.costo?`$${Number(c.costo).toLocaleString()}`:'-'}</td>
+                          <td style={{padding:'8px 10px',fontSize:11,color:'var(--text3)'}}>{c.costo&&c.litros?`$${(c.costo/c.litros).toFixed(2)}`:'-'}</td>
+                          <td style={{padding:'8px 10px',fontSize:11,color:'var(--text2)'}}>{c.kilometraje?Number(c.kilometraje).toLocaleString():'-'}</td>
+                          <td style={{padding:'8px 10px',fontSize:12,color:'var(--text2)'}}>{c.estacion||'-'}</td>
+                          <td style={{padding:'8px 10px',fontSize:12,color:'var(--text2)'}}>{c.operador||'-'}</td>
+                        </tr>
+                      ))}
+                      <tr style={{borderTop:'1.5px solid var(--border)',background:'var(--bg2)'}}>
+                        <td colSpan={2} style={{padding:'8px 10px',fontWeight:600,fontSize:12}}>TOTALES</td>
+                        <td style={{padding:'8px 10px',fontWeight:700,color:'#D85A30'}}>{totalLts.toLocaleString()} lts</td>
+                        <td style={{padding:'8px 10px',fontWeight:700,color:'#1D9E75'}}>${totalComb.toLocaleString()}</td>
+                        <td colSpan={4}></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* VIÁTICOS */}
+          {tab==='viat'&&(
+            <div>
+              {vViat.length===0?<EmptyState msg="Sin registros de viáticos o casetas."/>:(
+                <div style={{overflowX:'auto'}}>
+                  <table style={{width:'100%',borderCollapse:'collapse',fontSize:13}}>
+                    <thead>
+                      <tr style={{borderBottom:'0.5px solid var(--border)'}}>
+                        {['Fecha','Tipo','Monto','Origen','Destino','Operador','Notas'].map(h=>(
+                          <th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',fontSize:12}}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vViat.map(v=>(
+                        <tr key={v.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+                          <td style={{padding:'8px 10px',whiteSpace:'nowrap'}}>{v.fecha}</td>
+                          <td style={{padding:'8px 10px'}}><Badge color='purple'>{v.tipo}</Badge></td>
+                          <td style={{padding:'8px 10px',fontWeight:600,color:'#534AB7'}}>${Number(v.monto).toLocaleString()}</td>
+                          <td style={{padding:'8px 10px',fontSize:12,color:'var(--text2)'}}>{v.origen||'-'}</td>
+                          <td style={{padding:'8px 10px',fontSize:12,color:'var(--text2)'}}>{v.destino||'-'}</td>
+                          <td style={{padding:'8px 10px',fontSize:12,color:'var(--text2)'}}>{v.operador||'-'}</td>
+                          <td style={{padding:'8px 10px',fontSize:11,color:'var(--text3)',maxWidth:140,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{v.notas||'-'}</td>
+                        </tr>
+                      ))}
+                      <tr style={{borderTop:'1.5px solid var(--border)',background:'var(--bg2)'}}>
+                        <td colSpan={2} style={{padding:'8px 10px',fontWeight:600,fontSize:12}}>TOTAL</td>
+                        <td style={{padding:'8px 10px',fontWeight:700,color:'#534AB7'}}>${totalViat.toLocaleString()}</td>
+                        <td colSpan={4}></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
 /* ── Vehículos ── */
-function Vehiculos({vehiculos,setVehiculos,loading}){
+function Vehiculos({vehiculos,setVehiculos,mtto,combustible,viaticos,loading}){
   const [showForm,setShowForm]=useState(false)
   const [saving,setSaving]=useState(false)
   const [filterCampo,setFilterCampo]=useState('Todos')
   const [filterMarca,setFilterMarca]=useState('Todos')
   const [search,setSearch]=useState('')
+  const [fichaVeh,setFichaVeh]=useState(null)
   const emptyForm={no_economico:'',nombre:'',campo:'Las Mercedes',marca:'NISSAN',modelo:'',año:'',chofer:'',activo:true}
   const [form,setForm]=useState(emptyForm)
 
@@ -214,18 +467,34 @@ function Vehiculos({vehiculos,setVehiculos,loading}){
           {campo} <span style={{fontWeight:400,color:'var(--text3)',fontSize:12}}>({byCampo[campo].length})</span>
         </p>
         <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(220px,1fr))',gap:10}}>
-          {byCampo[campo].map(v=><div key={v.id} style={{background:'var(--bg)',border:'0.5px solid var(--border)',borderRadius:10,padding:'12px 14px',opacity:v.activo?1:0.55}}>
-            <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
-              <span style={{fontWeight:700,fontSize:15}}>#{v.no_economico}</span>
-              <Badge color={v.activo?'success':'gray'}>{v.activo?'Activo':'Inactivo'}</Badge>
+          {byCampo[campo].map(v=>{
+            const vMttoCount=mtto.filter(m=>m.vehiculo_id===v.id).length
+            const vCostMtto=mtto.filter(m=>m.vehiculo_id===v.id).reduce((s,m)=>s+(+m.mano_obra||0)+(+m.refacciones||0),0)
+            return <div key={v.id}
+              onClick={()=>setFichaVeh(v)}
+              style={{background:'var(--bg)',border:'0.5px solid var(--border)',borderRadius:10,padding:'12px 14px',opacity:v.activo?1:0.65,cursor:'pointer',transition:'box-shadow 0.15s, border-color 0.15s'}}
+              onMouseEnter={e=>{e.currentTarget.style.boxShadow='0 4px 16px rgba(0,0,0,0.10)';e.currentTarget.style.borderColor='#1D9E75'}}
+              onMouseLeave={e=>{e.currentTarget.style.boxShadow='none';e.currentTarget.style.borderColor='rgba(0,0,0,0.1)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                <span style={{fontWeight:700,fontSize:15}}>#{v.no_economico}</span>
+                <Badge color={v.activo?'success':'gray'}>{v.activo?'Activo':'Inactivo'}</Badge>
+              </div>
+              <p style={{margin:'0 0 2px',fontSize:12,fontWeight:500,color:'var(--text)'}}>{v.nombre||`${v.marca} ${v.modelo}`}</p>
+              <p style={{margin:'0 0 4px',fontSize:11,color:'var(--text2)'}}>{v.marca} {v.modelo} {v.año&&`· ${v.año}`}</p>
+              {v.chofer&&<p style={{margin:'0 0 6px',fontSize:11,color:'var(--text3)'}}>👤 {v.chofer}</p>}
+              {vMttoCount>0&&(
+                <div style={{marginBottom:8,padding:'4px 8px',background:'#EAF3FB',borderRadius:6,fontSize:11,color:'#185FA5'}}>
+                  🔧 {vMttoCount} mtto{vMttoCount!==1?'s':''} · <strong>${vCostMtto.toLocaleString()}</strong>
+                </div>
+              )}
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <span style={{fontSize:11,color:'#1D9E75',fontWeight:500}}>Ver historial →</span>
+                <button onClick={e=>{e.stopPropagation();toggleActivo(v.id,v.activo)}} style={{fontSize:11,padding:'3px 8px',borderRadius:6,border:'0.5px solid var(--border2)',background:'none',cursor:'pointer',color:'var(--text2)'}}>
+                  {v.activo?'Desactivar':'Activar'}
+                </button>
+              </div>
             </div>
-            <p style={{margin:'0 0 2px',fontSize:12,fontWeight:500,color:'var(--text)'}}>{v.nombre||`${v.marca} ${v.modelo}`}</p>
-            <p style={{margin:'0 0 2px',fontSize:11,color:'var(--text2)'}}>{v.marca} {v.modelo} {v.año&&`· ${v.año}`}</p>
-            {v.chofer&&<p style={{margin:'0 0 8px',fontSize:11,color:'var(--text3)'}}>👤 {v.chofer}</p>}
-            <button onClick={()=>toggleActivo(v.id,v.activo)} style={{fontSize:11,padding:'3px 8px',borderRadius:6,border:'0.5px solid var(--border2)',background:'none',cursor:'pointer',color:'var(--text2)'}}>
-              {v.activo?'Desactivar':'Activar'}
-            </button>
-          </div>)}
+          })}
         </div>
       </div>)}
     </div>}
@@ -252,6 +521,7 @@ function Vehiculos({vehiculos,setVehiculos,loading}){
         <Btn onClick={handleSubmit} disabled={saving}>{saving?'Guardando...':'Agregar'}</Btn>
       </div>
     </Modal>}
+    {fichaVeh&&<FichaVehiculo vehiculo={fichaVeh} mtto={mtto} combustible={combustible} viaticos={viaticos} onClose={()=>setFichaVeh(null)}/>}
   </div>
 }
 
@@ -749,7 +1019,7 @@ export default function App(){
     </div>
     <div style={{maxWidth:1200,margin:'0 auto',padding:'24px 20px'}}>
       {page==='dashboard'&&<Dashboard vehiculos={vehiculos} mtto={mtto} combustible={combustible} viaticos={viaticos}/>}
-      {page==='vehiculos'&&<Vehiculos vehiculos={vehiculos} setVehiculos={setVehiculos} loading={loading}/>}
+      {page==='vehiculos'&&<Vehiculos vehiculos={vehiculos} setVehiculos={setVehiculos} mtto={mtto} combustible={combustible} viaticos={viaticos} loading={loading}/>}
       {page==='mtto'&&<Mantenimientos mtto={mtto} setMtto={setMtto} vehiculos={vehiculos} loading={loading}/>}
       {page==='combustible'&&<Combustible combustible={combustible} setCombustible={setCombustible} vehiculos={vehiculos} loading={loading}/>}
       {page==='viaticos'&&<Viaticos viaticos={viaticos} setViaticos={setViaticos} vehiculos={vehiculos} loading={loading}/>}
