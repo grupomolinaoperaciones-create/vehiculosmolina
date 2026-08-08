@@ -22,6 +22,25 @@ const NAV = [
   {id:'analisis',label:'Análisis',emoji:'📈'},
 ]
 
+/* ── File upload helper (Supabase Storage) ── */
+async function uploadFotos(files){
+  const urls=[]
+  for(const file of files){
+    const ext=file.name.split('.').pop()
+    const path=`mtto/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
+    const {error}=await supabase.storage.from('mtto-fotos').upload(path,file)
+    if(error){
+      // fallback to blob URL if storage not configured
+      urls.push(URL.createObjectURL(file))
+      console.warn('Storage upload failed, using blob URL:',error.message)
+      continue
+    }
+    const {data}=supabase.storage.from('mtto-fotos').getPublicUrl(path)
+    urls.push(data.publicUrl)
+  }
+  return urls
+}
+
 /* ── UI Primitives ── */
 function Badge({color='info',children}){
   const m={success:{bg:'#E1F5EE',c:'#0F6E56'},warning:{bg:'#FAEEDA',c:'#854F0B'},danger:{bg:'#FCEBEB',c:'#A32D2D'},info:{bg:'#E6F1FB',c:'#185FA5'},gray:{bg:'#F1EFE8',c:'#5F5E5A'},purple:{bg:'#EEEDFE',c:'#3C3489'}}
@@ -539,11 +558,12 @@ function Mantenimientos({mtto,setMtto,vehiculos,loading}){
   const emptyForm={fecha:new Date().toISOString().split('T')[0],vehiculo_id:'',tipo:'Preventivo',descripcion:'',mano_obra:'',refacciones:'',tecnico:'',estado:'Completado',observaciones:'',kilometraje:''}
   const [form,setForm]=useState(emptyForm)
 
-  const openNew=()=>{setEditId(null);setForm(emptyForm);setFotoPreviews([]);setShowForm(true)}
+  const openNew=()=>{setEditId(null);setForm(emptyForm);setFotoPreviews([]);setPendingFiles([]);setShowForm(true)}
   const openEdit=(m)=>{
     setEditId(m.id)
     setForm({fecha:m.fecha,vehiculo_id:m.vehiculo_id,tipo:m.tipo,descripcion:m.descripcion||'',mano_obra:m.mano_obra||'',refacciones:m.refacciones||'',tecnico:m.tecnico||'',estado:m.estado,observaciones:m.observaciones||'',kilometraje:m.kilometraje||''})
     setFotoPreviews(m.fotos||[])
+    setPendingFiles([])
     setShowForm(true)
   }
   const handleSubmit=async()=>{
@@ -757,11 +777,10 @@ function Presupuesto({vehiculos,combustible,presupuestos,setPresupuestos,loading
       const {error}=await supabase.from('presupuesto_combustible').update({litros_asignados:+litros}).eq('id',existing.id)
       if(!error) setPresupuestos(p=>p.map(x=>x.id===existing.id?{...x,litros_asignados:+litros}:x))
     } else {
-      const {data,error}=await supabase.from('presupuesto_combustible').insert([{vehiculo_id:vehiculoId,mes,litros_asignados:+litros}]).select()
+      const {data,error}=await supabase.from('presupuesto_combustible').insert([{vehiculo_id:Number(vehiculoId),mes,litros_asignados:+litros}]).select()
       if(!error) setPresupuestos(p=>[...p,data[0]])
     }
-    if(saving){}
-    setEditId(null); setLitros('')
+       setEditId(null); setLitros('')
     setSaving(false)
   }
 
@@ -1032,6 +1051,21 @@ function Combustible({combustible,setCombustible,vehiculos,loading}){
   const [saving,setSaving]=useState(false)
   const emptyForm={fecha:new Date().toISOString().split('T')[0],vehiculo_id:'',litros:'',costo:'',kilometraje:'',tipo_combustible:'Gasolina',estacion:'',operador:''}
   const [form,setForm]=useState(emptyForm)
+
+  // Auto-open form with vehicle preselected when coming from QR scan
+  useEffect(()=>{
+    const params=new URLSearchParams(window.location.search)
+    const vehId=params.get('veh')
+    if(vehId&&vehiculos.length>0){
+      const veh=vehiculos.find(v=>String(v.id)===vehId)
+      if(veh){
+        setForm(f=>({...f,vehiculo_id:veh.id}))
+        setShowForm(true)
+        // Clean URL so refresh doesn't reopen
+        window.history.replaceState({},'',window.location.pathname)
+      }
+    }
+  },[vehiculos])
 
   const handleSubmit=async()=>{
     if(!form.vehiculo_id||!form.litros){alert('Vehículo y litros son obligatorios');return}
