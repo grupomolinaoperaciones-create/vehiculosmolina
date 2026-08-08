@@ -15,6 +15,9 @@ const NAV = [
   {id:'vehiculos',label:'Vehículos',emoji:'🚗'},
   {id:'mtto',label:'Mantenimientos',emoji:'🔧'},
   {id:'combustible',label:'Combustible',emoji:'⛽'},
+  {id:'presupuesto',label:'Presupuesto',emoji:'📋'},
+  {id:'reporte',label:'Reporte',emoji:'📑'},
+  {id:'qrcodes',label:'Códigos QR',emoji:'🔲'},
   {id:'viaticos',label:'Viáticos / Casetas',emoji:'🛣️'},
   {id:'analisis',label:'Análisis',emoji:'📈'},
 ]
@@ -679,6 +682,350 @@ function Mantenimientos({mtto,setMtto,vehiculos,loading}){
   </div>
 }
 
+/* ── QR Code Generator (SVG, no external lib) ── */
+function QRSvg({value, size=120}){
+  // Simple QR placeholder using identifiable pattern — real QR via Google Charts API
+  const url = `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&data=${encodeURIComponent(value)}&bgcolor=ffffff&color=1a1a18&margin=4`
+  return <img src={url} alt={`QR ${value}`} width={size} height={size} style={{borderRadius:6,display:'block'}}/>
+}
+
+/* ── Códigos QR ── */
+function QRCodes({vehiculos}){
+  const [filterCampo,setFilterCampo]=useState('Todos')
+  const BASE_URL = window.location.origin + window.location.pathname
+
+  const rows = vehiculos.filter(v=>filterCampo==='Todos'||v.campo===filterCampo)
+
+  const handlePrint = () => window.print()
+
+  return <div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+      <div>
+        <h2 style={{fontSize:18,fontWeight:600,margin:'0 0 2px'}}>Códigos QR de vehículos</h2>
+        <p style={{fontSize:12,color:'var(--text3)',margin:0}}>Escanea para abrir el registro de combustible preseleccionado</p>
+      </div>
+      <button onClick={handlePrint} style={{padding:'8px 18px',borderRadius:8,background:'#378ADD',color:'#fff',border:'none',fontSize:13,fontWeight:500,cursor:'pointer'}}>🖨️ Imprimir todos</button>
+    </div>
+    <div style={{display:'flex',gap:10,marginBottom:16}} className="no-print">
+      <select value={filterCampo} onChange={e=>setFilterCampo(e.target.value)} style={{width:'auto',padding:'7px 12px'}}>
+        <option>Todos</option>{CAMPOS.map(c=><option key={c}>{c}</option>)}
+      </select>
+      <span style={{fontSize:12,color:'var(--text3)',alignSelf:'center'}}>{rows.length} vehículos</span>
+    </div>
+
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(180px,1fr))',gap:16}}>
+      {rows.map(v=>{
+        const qrUrl = `${BASE_URL}?veh=${v.id}&accion=combustible`
+        return <div key={v.id} style={{background:'var(--bg)',border:'0.5px solid var(--border)',borderRadius:10,padding:16,textAlign:'center',pageBreakInside:'avoid'}}>
+          <QRSvg value={qrUrl} size={140}/>
+          <div style={{marginTop:10}}>
+            <p style={{fontWeight:700,fontSize:16,margin:'0 0 2px'}}>#{v.no_economico}</p>
+            <p style={{fontSize:11,color:'var(--text2)',margin:'0 0 2px'}}>{v.nombre||`${v.marca} ${v.modelo}`}</p>
+            <p style={{fontSize:10,color:'var(--text3)',margin:0}}>{v.campo}</p>
+          </div>
+        </div>
+      })}
+    </div>
+  </div>
+}
+
+/* ── Presupuesto mensual de combustible ── */
+function Presupuesto({vehiculos,combustible,presupuestos,setPresupuestos,loading}){
+  const [saving,setSaving]=useState(false)
+  const [mes,setMes]=useState(new Date().toISOString().substring(0,7))
+  const [editId,setEditId]=useState(null)
+  const [litros,setLitros]=useState('')
+
+  const mesLabel = new Date(mes+'-01').toLocaleDateString('es-MX',{month:'long',year:'numeric'})
+
+  const presupuestoDelMes = presupuestos.filter(p=>p.mes===mes)
+  const presMap = Object.fromEntries(presupuestoDelMes.map(p=>[p.vehiculo_id, p]))
+
+  const consumoDelMes = useMemo(()=>{
+    const m={}
+    combustible.filter(c=>c.fecha?.startsWith(mes)).forEach(c=>{
+      m[c.vehiculo_id]=(m[c.vehiculo_id]||0)+(+c.litros||0)
+    })
+    return m
+  },[combustible,mes])
+
+  const savePres = async(vehiculoId) => {
+    if(!litros){return}
+    setSaving(true)
+    const existing = presMap[vehiculoId]
+    if(existing){
+      const {error}=await supabase.from('presupuesto_combustible').update({litros_asignados:+litros}).eq('id',existing.id)
+      if(!error) setPresupuestos(p=>p.map(x=>x.id===existing.id?{...x,litros_asignados:+litros}:x))
+    } else {
+      const {data,error}=await supabase.from('presupuesto_combustible').insert([{vehiculo_id:vehiculoId,mes,litros_asignados:+litros}]).select()
+      if(!error) setPresupuestos(p=>[...p,data[0]])
+    }
+    if(saving){}
+    setEditId(null); setLitros('')
+    setSaving(false)
+  }
+
+  const getAlertColor = (consumido, asignado) => {
+    if(!asignado) return null
+    const pct = consumido/asignado
+    if(pct >= 1) return {bar:'#E24B4A', bg:'#FCEBEB', label:'Excedido', badge:'danger'}
+    if(pct >= 0.8) return {bar:'#BA7517', bg:'#FAEEDA', label:'Por agotarse', badge:'warning'}
+    return {bar:'#1D9E75', bg:'#E1F5EE', label:'Normal', badge:'success'}
+  }
+
+  return <div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+      <div>
+        <h2 style={{fontSize:18,fontWeight:600,margin:'0 0 2px'}}>Presupuesto de combustible</h2>
+        <p style={{fontSize:12,color:'var(--text3)',margin:0,textTransform:'capitalize'}}>{mesLabel}</p>
+      </div>
+      <div style={{display:'flex',alignItems:'center',gap:10}}>
+        <label style={{fontSize:12,color:'var(--text2)'}}>Mes:</label>
+        <input type="month" value={mes} onChange={e=>setMes(e.target.value)} style={{width:'auto',padding:'6px 10px'}}/>
+      </div>
+    </div>
+
+    {loading?<div style={{textAlign:'center',padding:40,color:'var(--text3)'}}>Cargando...</div>:(
+      <div style={{display:'flex',flexDirection:'column',gap:10}}>
+        {vehiculos.map(v=>{
+          const pres = presMap[v.id]
+          const consumido = consumoDelMes[v.id]||0
+          const asignado = pres?.litros_asignados||0
+          const pct = asignado>0?Math.min(consumido/asignado,1):0
+          const alert = getAlertColor(consumido, asignado)
+          const isEditing = editId===v.id
+
+          return <div key={v.id} style={{background:'var(--bg)',border:`0.5px solid ${alert?alert.bar+'40':'var(--border)'}`,borderRadius:10,padding:'12px 16px'}}>
+            <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',flexWrap:'wrap',gap:8}}>
+              <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                <span style={{fontWeight:700,fontSize:14}}>#{v.no_economico}</span>
+                <span style={{fontSize:12,color:'var(--text2)'}}>{v.nombre||`${v.marca} ${v.modelo}`}</span>
+                <Badge color="gray">{v.campo}</Badge>
+                {alert&&<Badge color={alert.badge}>{alert.label}</Badge>}
+              </div>
+              <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                <span style={{fontSize:13,color:'var(--text2)'}}>
+                  <strong style={{color:alert?.bar||'var(--text)'}}>{consumido.toFixed(0)}</strong>
+                  {asignado>0&&<> / {asignado} lts</>}
+                </span>
+                {isEditing?(
+                  <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                    <input type="number" value={litros} onChange={e=>setLitros(e.target.value)}
+                      placeholder="Lts asignados" style={{width:130,padding:'4px 8px',fontSize:12}}
+                      autoFocus onKeyDown={e=>{if(e.key==='Enter')savePres(v.id)}}/>
+                    <Btn small color="#1D9E75" onClick={()=>savePres(v.id)} disabled={saving}>Guardar</Btn>
+                    <Btn small outline color="#888" onClick={()=>{setEditId(null);setLitros('')}}>✕</Btn>
+                  </div>
+                ):(
+                  <button onClick={()=>{setEditId(v.id);setLitros(asignado||'')}} style={{fontSize:11,padding:'3px 10px',borderRadius:6,border:'0.5px solid var(--border2)',background:'none',cursor:'pointer',color:'var(--text2)'}}>
+                    {asignado?'✏️ Editar':'+ Asignar litros'}
+                  </button>
+                )}
+              </div>
+            </div>
+            {asignado>0&&(
+              <div style={{marginTop:10}}>
+                <div style={{height:8,borderRadius:4,background:'var(--bg2)',overflow:'hidden'}}>
+                  <div style={{height:'100%',width:`${pct*100}%`,background:alert?.bar||'#1D9E75',borderRadius:4,transition:'width 0.4s'}}/>
+                </div>
+                <p style={{fontSize:10,color:'var(--text3)',margin:'3px 0 0',textAlign:'right'}}>
+                  {(pct*100).toFixed(0)}% consumido · {Math.max(0,asignado-consumido).toFixed(0)} lts disponibles
+                </p>
+              </div>
+            )}
+          </div>
+        })}
+      </div>
+    )}
+  </div>
+}
+
+/* ── Reporte de combustible ── */
+function ReporteCombustible({combustible,vehiculos}){
+  const [filterVeh,setFilterVeh]=useState('Todos')
+  const [filterCampo,setFilterCampo]=useState('Todos')
+  const [filterDesde,setFilterDesde]=useState('')
+  const [filterHasta,setFilterHasta]=useState('')
+
+  const vehMap = Object.fromEntries(vehiculos.map(v=>[v.id,v]))
+
+  const rows = useMemo(()=>combustible.filter(c=>{
+    const veh=vehMap[c.vehiculo_id]
+    if(filterVeh!=='Todos'&&String(c.vehiculo_id)!==filterVeh) return false
+    if(filterCampo!=='Todos'&&veh?.campo!==filterCampo) return false
+    if(filterDesde&&c.fecha<filterDesde) return false
+    if(filterHasta&&c.fecha>filterHasta) return false
+    return true
+  }),[combustible,filterVeh,filterCampo,filterDesde,filterHasta,vehMap])
+
+  // Rendimiento por unidad (km/litro)
+  const rendimiento = useMemo(()=>{
+    const m={}
+    rows.forEach(c=>{
+      const id=c.vehiculo_id
+      if(!m[id]) m[id]={litros:0,km_inicial:null,km_final:null,cargas:0,costo:0}
+      m[id].litros+=(+c.litros||0)
+      m[id].costo+=(+c.costo||0)
+      m[id].cargas++
+      const km=+c.kilometraje||0
+      if(km>0){
+        if(m[id].km_inicial===null||km<m[id].km_inicial) m[id].km_inicial=km
+        if(m[id].km_final===null||km>m[id].km_final) m[id].km_final=km
+      }
+    })
+    return Object.entries(m).map(([id,d])=>{
+      const veh=vehMap[id]
+      const km_recorridos=d.km_final&&d.km_inicial?d.km_final-d.km_inicial:0
+      const rendKmLt=km_recorridos>0&&d.litros>0?(km_recorridos/d.litros).toFixed(2):'-'
+      return {
+        id, no_eco:veh?.no_economico||'?',
+        nombre:veh?.nombre||`${veh?.marca||''} ${veh?.modelo||''}`,
+        campo:veh?.campo||'-',
+        litros:+d.litros.toFixed(1), costo:d.costo,
+        cargas:d.cargas, km_recorridos, rendKmLt
+      }
+    }).sort((a,b)=>b.litros-a.litros)
+  },[rows,vehMap])
+
+  const totalLts=rows.reduce((s,c)=>s+(+c.litros||0),0)
+  const totalCosto=rows.reduce((s,c)=>s+(+c.costo||0),0)
+
+  const exportCSV=()=>{
+    const header=['Fecha','No. Eco','Vehículo','Campo','Combustible','Litros','Costo','Km','Estación','Operador']
+    const data=rows.map(c=>{
+      const veh=vehMap[c.vehiculo_id]
+      return [c.fecha,`#${veh?.no_economico||'?'}`,`"${veh?.nombre||''}"`,veh?.campo||'',c.tipo_combustible||'',c.litros||0,c.costo||0,c.kilometraje||'',`"${c.estacion||''}"`,`"${c.operador||''}"`]
+    })
+    const csv=[[...header],...data,[''],['TOTALES','','','','',totalLts.toFixed(1),totalCosto]].map(r=>r.join(',')).join('\n')
+    const blob=new Blob(['\uFEFF'+csv],{type:'text/csv;charset=utf-8'})
+    const url=URL.createObjectURL(blob)
+    const a=document.createElement('a'); a.href=url; a.download=`reporte_combustible_${new Date().toISOString().split('T')[0]}.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  return <div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+      <div>
+        <h2 style={{fontSize:18,fontWeight:600,margin:'0 0 2px'}}>Reporte de combustible</h2>
+        <p style={{fontSize:12,color:'var(--text3)',margin:0}}>{rows.length} registros · {totalLts.toFixed(0)} lts · ${totalCosto.toLocaleString()}</p>
+      </div>
+      <div style={{display:'flex',gap:8}}>
+        <button onClick={()=>window.print()} style={{padding:'7px 14px',borderRadius:8,background:'#378ADD',color:'#fff',border:'none',fontSize:12,cursor:'pointer',fontWeight:500}}>🖨️ Imprimir</button>
+        <button onClick={exportCSV} style={{padding:'7px 14px',borderRadius:8,background:'#1D9E75',color:'#fff',border:'none',fontSize:12,cursor:'pointer',fontWeight:500}}>📥 Exportar CSV</button>
+      </div>
+    </div>
+
+    {/* Filtros */}
+    <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap',background:'var(--bg)',padding:'12px 14px',borderRadius:10,border:'0.5px solid var(--border)'}}>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Vehículo</label>
+        <select value={filterVeh} onChange={e=>setFilterVeh(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}>
+          <option value="Todos">Todos</option>
+          {vehiculos.map(v=><option key={v.id} value={String(v.id)}>#{v.no_economico} {v.nombre||v.marca}</option>)}
+        </select>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Campo</label>
+        <select value={filterCampo} onChange={e=>setFilterCampo(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}>
+          <option>Todos</option>{CAMPOS.map(c=><option key={c}>{c}</option>)}
+        </select>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Desde</label>
+        <input type="date" value={filterDesde} onChange={e=>setFilterDesde(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}/>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Hasta</label>
+        <input type="date" value={filterHasta} onChange={e=>setFilterHasta(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}/>
+      </div>
+      {(filterVeh!=='Todos'||filterCampo!=='Todos'||filterDesde||filterHasta)&&(
+        <button onClick={()=>{setFilterVeh('Todos');setFilterCampo('Todos');setFilterDesde('');setFilterHasta('')}}
+          style={{alignSelf:'flex-end',padding:'6px 12px',borderRadius:6,border:'0.5px solid var(--border2)',background:'none',fontSize:12,cursor:'pointer',color:'var(--text2)'}}>
+          ✕ Limpiar filtros
+        </button>
+      )}
+    </div>
+
+    {/* Resumen de rendimiento por unidad */}
+    {rendimiento.length>0&&(
+      <div style={{marginBottom:20}}>
+        <p style={{fontSize:13,fontWeight:600,margin:'0 0 10px'}}>Rendimiento por unidad (km/lt)</p>
+        <div style={{overflowX:'auto'}}>
+          <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+            <thead>
+              <tr style={{borderBottom:'0.5px solid var(--border)',background:'var(--bg2)'}}>
+                {['No. Eco','Vehículo','Campo','Cargas','Litros','Costo','Km recorridos','Rendimiento km/lt'].map(h=>(
+                  <th key={h} style={{padding:'7px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',whiteSpace:'nowrap'}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rendimiento.map(r=>(
+                <tr key={r.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+                  <td style={{padding:'7px 10px',fontWeight:700}}>#{r.no_eco}</td>
+                  <td style={{padding:'7px 10px',fontSize:11,color:'var(--text2)'}}>{r.nombre}</td>
+                  <td style={{padding:'7px 10px'}}><Badge color="gray">{r.campo?.split(' ')[0]}</Badge></td>
+                  <td style={{padding:'7px 10px',textAlign:'center'}}>{r.cargas}</td>
+                  <td style={{padding:'7px 10px',fontWeight:600,color:'#D85A30'}}>{r.litros} lts</td>
+                  <td style={{padding:'7px 10px',color:'#1D9E75'}}>${r.costo.toLocaleString()}</td>
+                  <td style={{padding:'7px 10px',color:'var(--text2)'}}>{r.km_recorridos>0?`${r.km_recorridos.toLocaleString()} km`:'-'}</td>
+                  <td style={{padding:'7px 10px'}}>
+                    {r.rendKmLt!=='-'?(
+                      <span style={{fontWeight:700,color:+r.rendKmLt>=10?'#1D9E75':+r.rendKmLt>=7?'#BA7517':'#E24B4A'}}>
+                        {r.rendKmLt} km/lt
+                      </span>
+                    ):'-'}
+                  </td>
+                </tr>
+              ))}
+              <tr style={{borderTop:'1.5px solid var(--border)',background:'var(--bg2)'}}>
+                <td colSpan={4} style={{padding:'7px 10px',fontWeight:600,fontSize:12}}>TOTALES</td>
+                <td style={{padding:'7px 10px',fontWeight:700,color:'#D85A30'}}>{totalLts.toFixed(0)} lts</td>
+                <td style={{padding:'7px 10px',fontWeight:700,color:'#1D9E75'}}>${totalCosto.toLocaleString()}</td>
+                <td colSpan={2}></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    )}
+
+    {/* Detalle de registros */}
+    <p style={{fontSize:13,fontWeight:600,margin:'0 0 10px'}}>Detalle de cargas</p>
+    {rows.length===0?<div style={{textAlign:'center',padding:'30px 20px',color:'var(--text3)',fontSize:13}}>⛽ Sin registros con los filtros seleccionados.</div>:(
+      <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+          <thead>
+            <tr style={{borderBottom:'0.5px solid var(--border)',background:'var(--bg2)'}}>
+              {['Fecha','No. Eco','Campo','Combustible','Litros','Costo','$/lt','Kilometraje','Estación','Operador'].map(h=>(
+                <th key={h} style={{padding:'7px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',whiteSpace:'nowrap'}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(c=>{
+              const veh=vehMap[c.vehiculo_id]
+              const pxl=c.litros>0&&c.costo>0?(c.costo/c.litros).toFixed(2):'-'
+              return <tr key={c.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+                <td style={{padding:'7px 10px',whiteSpace:'nowrap'}}>{c.fecha}</td>
+                <td style={{padding:'7px 10px',fontWeight:600}}>#{veh?.no_economico||'?'}</td>
+                <td style={{padding:'7px 10px'}}><Badge color="gray">{veh?.campo?.split(' ')[0]||'-'}</Badge></td>
+                <td style={{padding:'7px 10px'}}>{c.tipo_combustible}</td>
+                <td style={{padding:'7px 10px',fontWeight:600,color:'#D85A30'}}>{c.litros} lts</td>
+                <td style={{padding:'7px 10px',color:'#1D9E75'}}>{c.costo?`$${Number(c.costo).toLocaleString()}`:'-'}</td>
+                <td style={{padding:'7px 10px',color:'var(--text3)'}}>{pxl!=='-'?`$${pxl}`:'-'}</td>
+                <td style={{padding:'7px 10px',color:'var(--text2)'}}>{c.kilometraje?Number(c.kilometraje).toLocaleString()+' km':'-'}</td>
+                <td style={{padding:'7px 10px',color:'var(--text2)'}}>{c.estacion||'-'}</td>
+                <td style={{padding:'7px 10px',color:'var(--text2)'}}>{c.operador||'-'}</td>
+              </tr>
+            })}
+          </tbody>
+        </table>
+      </div>
+    )}
+  </div>
+}
+
 /* ── Combustible ── */
 function Combustible({combustible,setCombustible,vehiculos,loading}){
   const [showForm,setShowForm]=useState(false)
@@ -973,20 +1320,30 @@ export default function App(){
   const [mtto,setMtto]=useState([])
   const [combustible,setCombustible]=useState([])
   const [viaticos,setViaticos]=useState([])
+  const [presupuestos,setPresupuestos]=useState([])
   const [loading,setLoading]=useState(true)
   const [dbError,setDbError]=useState(null)
+
+  // Handle QR scan: ?veh=ID&accion=combustible
+  useEffect(()=>{
+    const params=new URLSearchParams(window.location.search)
+    const vehId=params.get('veh')
+    const accion=params.get('accion')
+    if(vehId&&accion==='combustible') setPage('combustible')
+  },[])
 
   const loadAll=useCallback(async()=>{
     setLoading(true)
     try{
-      const [v,m,c,vi]=await Promise.all([
+      const [v,m,c,vi,p]=await Promise.all([
         supabase.from('vehiculos').select('*').order('no_economico'),
         supabase.from('mtto_vehiculos').select('*').order('fecha',{ascending:false}),
         supabase.from('combustible_vehiculos').select('*').order('fecha',{ascending:false}),
         supabase.from('viaticos_vehiculos').select('*').order('fecha',{ascending:false}),
+        supabase.from('presupuesto_combustible').select('*'),
       ])
       if(v.error||m.error||c.error||vi.error){setDbError('No se pudieron cargar los datos. Verifica que las tablas existan en Supabase.')}
-      else{setVehiculos(v.data||[]);setMtto(m.data||[]);setCombustible(c.data||[]);setViaticos(vi.data||[])}
+      else{setVehiculos(v.data||[]);setMtto(m.data||[]);setCombustible(c.data||[]);setViaticos(vi.data||[]);setPresupuestos(p.data||[])}
     }catch(e){setDbError('Error: '+e.message)}
     setLoading(false)
   },[])
@@ -1022,6 +1379,9 @@ export default function App(){
       {page==='vehiculos'&&<Vehiculos vehiculos={vehiculos} setVehiculos={setVehiculos} mtto={mtto} combustible={combustible} viaticos={viaticos} loading={loading}/>}
       {page==='mtto'&&<Mantenimientos mtto={mtto} setMtto={setMtto} vehiculos={vehiculos} loading={loading}/>}
       {page==='combustible'&&<Combustible combustible={combustible} setCombustible={setCombustible} vehiculos={vehiculos} loading={loading}/>}
+      {page==='presupuesto'&&<Presupuesto vehiculos={vehiculos} combustible={combustible} presupuestos={presupuestos} setPresupuestos={setPresupuestos} loading={loading}/>}
+      {page==='reporte'&&<ReporteCombustible combustible={combustible} vehiculos={vehiculos}/>}
+      {page==='qrcodes'&&<QRCodes vehiculos={vehiculos}/>}
       {page==='viaticos'&&<Viaticos viaticos={viaticos} setViaticos={setViaticos} vehiculos={vehiculos} loading={loading}/>}
       {page==='analisis'&&<Analisis vehiculos={vehiculos} mtto={mtto} combustible={combustible} viaticos={viaticos}/>}
     </div>
