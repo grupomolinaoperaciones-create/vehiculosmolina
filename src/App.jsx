@@ -712,7 +712,7 @@ function QRSvg({value, size=120}){
 /* ── Códigos QR ── */
 function QRCodes({vehiculos}){
   const [filterCampo,setFilterCampo]=useState('Todos')
-  const BASE_URL = window.location.origin + window.location.pathname
+  const BASE_URL = window.location.origin
 
   const rows = vehiculos.filter(v=>filterCampo==='Todos'||v.campo===filterCampo)
 
@@ -780,7 +780,8 @@ function Presupuesto({vehiculos,combustible,presupuestos,setPresupuestos,loading
       const {data,error}=await supabase.from('presupuesto_combustible').insert([{vehiculo_id:Number(vehiculoId),mes,litros_asignados:+litros}]).select()
       if(!error) setPresupuestos(p=>[...p,data[0]])
     }
-       setEditId(null); setLitros('')
+    setEditId(null)
+    setLitros('')
     setSaving(false)
   }
 
@@ -1070,7 +1071,7 @@ function Combustible({combustible,setCombustible,vehiculos,loading}){
   const handleSubmit=async()=>{
     if(!form.vehiculo_id||!form.litros){alert('Vehículo y litros son obligatorios');return}
     setSaving(true)
-    const row={...form,litros:+form.litros,costo:+form.costo||null,kilometraje:+form.kilometraje||null}
+    const row={...form,litros:+form.litros,costo:+form.costo||null,kilometraje:+form.kilometraje||null,vehiculo_id:Number(form.vehiculo_id)||null}
     const {data,error}=await supabase.from('combustible_vehiculos').insert([row]).select()
     if(error)alert('Error: '+error.message)
     else{setCombustible(c=>[data[0],...c]);setShowForm(false);setForm(emptyForm)}
@@ -1164,7 +1165,7 @@ function Viaticos({viaticos,setViaticos,vehiculos,loading}){
   const handleSubmit=async()=>{
     if(!form.vehiculo_id||!form.monto){alert('Vehículo y monto son obligatorios');return}
     setSaving(true)
-    const row={...form,monto:+form.monto}
+    const row={...form,monto:+form.monto,vehiculo_id:Number(form.vehiculo_id)||null}
     const {data,error}=await supabase.from('viaticos_vehiculos').insert([row]).select()
     if(error)alert('Error: '+error.message)
     else{setViaticos(v=>[data[0],...v]);setShowForm(false);setForm(emptyForm)}
@@ -1377,7 +1378,7 @@ export default function App(){
         supabase.from('presupuesto_combustible').select('*'),
       ])
       if(v.error||m.error||c.error||vi.error){setDbError('No se pudieron cargar los datos. Verifica que las tablas existan en Supabase.')}
-      else{setVehiculos(v.data||[]);setMtto(m.data||[]);setCombustible(c.data||[]);setViaticos(vi.data||[]);setPresupuestos(p.data||[])}
+      else{setVehiculos(v.data||[]);setMtto(m.data||[]);setCombustible(c.data||[]);setViaticos(vi.data||[]);setPresupuestos(p.error?[]:p.data||[])}
     }catch(e){setDbError('Error: '+e.message)}
     setLoading(false)
   },[])
