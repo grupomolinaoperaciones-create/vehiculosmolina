@@ -554,6 +554,10 @@ function Mantenimientos({mtto,setMtto,vehiculos,loading}){
   const [saving,setSaving]=useState(false)
   const [filterEstado,setFilterEstado]=useState('Todos')
   const [filterCampo,setFilterCampo]=useState('Todos')
+  const [filterVehiculo,setFilterVehiculo]=useState('Todos')
+  const [filterTipo,setFilterTipo]=useState('Todos')
+  const [filterDesde,setFilterDesde]=useState('')
+  const [filterHasta,setFilterHasta]=useState('')
   const [fotoPreviews,setFotoPreviews]=useState([])
   const emptyForm={fecha:new Date().toISOString().split('T')[0],vehiculo_id:'',tipo:'Preventivo',descripcion:'',mano_obra:'',refacciones:'',tecnico:'',estado:'Completado',observaciones:'',kilometraje:''}
   const [form,setForm]=useState(emptyForm)
@@ -594,19 +598,67 @@ function Mantenimientos({mtto,setMtto,vehiculos,loading}){
   const eColor={Completado:'success','En proceso':'warning',Pendiente:'info',Cancelado:'danger'}
   const tColor={Preventivo:'info',Correctivo:'warning',Emergencia:'danger'}
   const vehMap=Object.fromEntries(vehiculos.map(v=>[v.id,v]))
-  const rows=mtto.filter(m=>(filterEstado==='Todos'||m.estado===filterEstado)&&(filterCampo==='Todos'||vehMap[m.vehiculo_id]?.campo===filterCampo))
+  const vehIds=[...new Set(vehiculos.map(v=>v.id))].sort((a,b)=>String(a).localeCompare(String(b)))
+
+  const rows=useMemo(()=>mtto.filter(m=>{
+    const veh=vehMap[m.vehiculo_id]
+    if(filterEstado!=='Todos'&&m.estado!==filterEstado) return false
+    if(filterCampo!=='Todos'&&veh?.campo!==filterCampo) return false
+    if(filterVehiculo!=='Todos'&&String(m.vehiculo_id)!==filterVehiculo) return false
+    if(filterTipo!=='Todos'&&m.tipo!==filterTipo) return false
+    if(filterDesde&&m.fecha<filterDesde) return false
+    if(filterHasta&&m.fecha>filterHasta) return false
+    return true
+  }),[mtto,filterEstado,filterCampo,filterVehiculo,filterTipo,filterDesde,filterHasta,vehMap])
+
+  const totalCosto=rows.reduce((s,m)=>s+(+m.mano_obra||0)+(+m.refacciones||0),0)
+  const hayFiltros=filterCampo!=='Todos'||filterVehiculo!=='Todos'||filterTipo!=='Todos'||filterDesde||filterHasta
+  const limpiar=()=>{setFilterCampo('Todos');setFilterVehiculo('Todos');setFilterTipo('Todos');setFilterDesde('');setFilterHasta('')}
 
   return <div>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
-      <h2 style={{fontSize:18,fontWeight:600,margin:0}}>Mantenimientos</h2>
+      <div>
+        <h2 style={{fontSize:18,fontWeight:600,margin:'0 0 2px'}}>Mantenimientos</h2>
+        <p style={{fontSize:12,color:'var(--text3)',margin:0}}>{rows.length} registros · Costo: <strong style={{color:'#378ADD'}}>${totalCosto.toLocaleString()}</strong></p>
+      </div>
       <Btn onClick={openNew} color="#378ADD">+ Nuevo mantenimiento</Btn>
     </div>
-    <div style={{display:'flex',gap:8,marginBottom:14,flexWrap:'wrap'}}>
+
+    {/* Filtro por estado */}
+    <div style={{display:'flex',gap:8,marginBottom:12,flexWrap:'wrap'}}>
       {['Todos',...ESTADOS_MTTO].map(e=><button key={e} onClick={()=>setFilterEstado(e)} style={{padding:'6px 14px',borderRadius:8,cursor:'pointer',fontSize:12,fontWeight:500,border:filterEstado===e?'1.5px solid #378ADD':'0.5px solid var(--border)',background:filterEstado===e?'#E6F1FB':'transparent',color:filterEstado===e?'#185FA5':'var(--text2)'}}>{e}</button>)}
-      <select value={filterCampo} onChange={e=>setFilterCampo(e.target.value)} style={{width:'auto',padding:'6px 12px',marginLeft:8}}>
-        <option>Todos</option>{CAMPOS.map(c=><option key={c}>{c}</option>)}
-      </select>
-      <span style={{fontSize:12,color:'var(--text3)',alignSelf:'center'}}>{rows.length} registros</span>
+    </div>
+
+    {/* Filtros avanzados */}
+    <div style={{background:'var(--bg)',border:'0.5px solid var(--border)',borderRadius:10,padding:'12px 14px',marginBottom:14,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Campo</label>
+        <select value={filterCampo} onChange={e=>setFilterCampo(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}>
+          <option>Todos</option>{CAMPOS.map(c=><option key={c}>{c}</option>)}
+        </select>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Vehículo</label>
+        <select value={filterVehiculo} onChange={e=>setFilterVehiculo(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}>
+          <option value="Todos">Todos</option>
+          {vehiculos.filter(v=>filterCampo==='Todos'||v.campo===filterCampo).map(v=><option key={v.id} value={String(v.id)}>#{v.no_economico} {v.nombre||v.marca}</option>)}
+        </select>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Tipo</label>
+        <select value={filterTipo} onChange={e=>setFilterTipo(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}>
+          <option>Todos</option>{TIPOS_MTTO.map(t=><option key={t}>{t}</option>)}
+        </select>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Desde</label>
+        <input type="date" value={filterDesde} onChange={e=>setFilterDesde(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}/>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Hasta</label>
+        <input type="date" value={filterHasta} onChange={e=>setFilterHasta(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}/>
+      </div>
+      {hayFiltros&&<button onClick={limpiar} style={{alignSelf:'flex-end',padding:'6px 12px',borderRadius:6,border:'0.5px solid var(--border2)',background:'none',fontSize:12,cursor:'pointer',color:'var(--text2)'}}>✕ Limpiar</button>}
     </div>
     {loading?<Spinner/>:rows.length===0?<EmptyState msg="Sin mantenimientos registrados."/>:
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
