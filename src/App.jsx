@@ -559,6 +559,7 @@ function Mantenimientos({mtto,setMtto,vehiculos,loading}){
   const [filterDesde,setFilterDesde]=useState('')
   const [filterHasta,setFilterHasta]=useState('')
   const [fotoPreviews,setFotoPreviews]=useState([])
+  const [pendingFiles,setPendingFiles]=useState([])
   const emptyForm={fecha:new Date().toISOString().split('T')[0],vehiculo_id:'',tipo:'Preventivo',descripcion:'',mano_obra:'',refacciones:'',tecnico:'',estado:'Completado',observaciones:'',kilometraje:''}
   const [form,setForm]=useState(emptyForm)
 
@@ -573,7 +574,10 @@ function Mantenimientos({mtto,setMtto,vehiculos,loading}){
   const handleSubmit=async()=>{
     if(!form.vehiculo_id||!form.descripcion){alert('Vehículo y descripción son obligatorios');return}
     setSaving(true)
-    const row={...form,mano_obra:+form.mano_obra||0,refacciones:+form.refacciones||0,kilometraje:+form.kilometraje||null,fotos:fotoPreviews}
+    const existingUrls=fotoPreviews.filter(u=>!u.startsWith('blob:'))
+    const uploadedUrls=pendingFiles.length>0?await uploadFotos(pendingFiles):[]
+    const allFotos=[...existingUrls,...uploadedUrls]
+    const row={...form,mano_obra:+form.mano_obra||0,refacciones:+form.refacciones||0,kilometraje:+form.kilometraje||null,vehiculo_id:Number(form.vehiculo_id)||null,fotos:allFotos}
     if(editId){
       const {error}=await supabase.from('mtto_vehiculos').update(row).eq('id',editId)
       if(error)alert('Error: '+error.message)
@@ -737,7 +741,7 @@ function Mantenimientos({mtto,setMtto,vehiculos,loading}){
       <Field label="📷 Fotos del trabajo">
         <label style={{display:'inline-flex',alignItems:'center',gap:8,padding:'8px 16px',border:'1px dashed var(--border2)',borderRadius:8,cursor:'pointer',fontSize:13,color:'var(--text2)'}}>
           Subir fotos
-          <input type="file" accept="image/*" multiple onChange={e=>{const urls=Array.from(e.target.files).map(f=>URL.createObjectURL(f));setFotoPreviews(p=>[...p,...urls])}} style={{display:'none'}}/>
+          <input type="file" accept="image/*" multiple onChange={e=>{const files=Array.from(e.target.files);setFotoPreviews(p=>[...p,...files.map(f=>URL.createObjectURL(f))]);setPendingFiles(p=>[...p,...files])}} style={{display:'none'}}/>
         </label>
         {fotoPreviews.length>0&&<div style={{display:'flex',gap:8,marginTop:8,flexWrap:'wrap'}}>
           {fotoPreviews.map((url,i)=><div key={i} style={{position:'relative'}}>
