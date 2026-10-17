@@ -14,9 +14,10 @@ const NAV = [
   {id:'dashboard',label:'Dashboard',emoji:'📊'},
   {id:'vehiculos',label:'Vehículos',emoji:'🚗'},
   {id:'mtto',label:'Mantenimientos',emoji:'🔧'},
+  {id:'reporte_mtto',label:'Reporte Mtto',emoji:'📋'},
   {id:'combustible',label:'Combustible',emoji:'⛽'},
   {id:'presupuesto',label:'Presupuesto',emoji:'📋'},
-  {id:'reporte',label:'Reporte',emoji:'📑'},
+  {id:'reporte',label:'Reporte Comb.',emoji:'📑'},
   {id:'qrcodes',label:'Códigos QR',emoji:'🔲'},
   {id:'viaticos',label:'Viáticos / Casetas',emoji:'🛣️'},
   {id:'analisis',label:'Análisis',emoji:'📈'},
@@ -916,6 +917,169 @@ function Presupuesto({vehiculos,combustible,presupuestos,setPresupuestos,loading
   </div>
 }
 
+/* ── Reporte de Mantenimientos ── */
+function ReporteMtto({mtto,vehiculos}){
+  const [filterCampo,setFilterCampo]=useState('Todos')
+  const [filterVehiculo,setFilterVehiculo]=useState('Todos')
+  const [filterTipo,setFilterTipo]=useState('Todos')
+  const [filterEstado,setFilterEstado]=useState('Todos')
+  const [filterDesde,setFilterDesde]=useState('')
+  const [filterHasta,setFilterHasta]=useState('')
+
+  const vehMap=Object.fromEntries(vehiculos.map(v=>[v.id,v]))
+
+  const rows=useMemo(()=>mtto.filter(m=>{
+    const veh=vehMap[m.vehiculo_id]
+    if(filterCampo!=='Todos'&&veh?.campo!==filterCampo) return false
+    if(filterVehiculo!=='Todos'&&String(m.vehiculo_id)!==filterVehiculo) return false
+    if(filterTipo!=='Todos'&&m.tipo!==filterTipo) return false
+    if(filterEstado!=='Todos'&&m.estado!==filterEstado) return false
+    if(filterDesde&&m.fecha<filterDesde) return false
+    if(filterHasta&&m.fecha>filterHasta) return false
+    return true
+  }),[mtto,filterCampo,filterVehiculo,filterTipo,filterEstado,filterDesde,filterHasta,vehMap])
+
+  const totalMO=rows.reduce((s,m)=>s+(+m.mano_obra||0),0)
+  const totalRef=rows.reduce((s,m)=>s+(+m.refacciones||0),0)
+  const totalGeneral=totalMO+totalRef
+  const hayFiltros=filterCampo!=='Todos'||filterVehiculo!=='Todos'||filterTipo!=='Todos'||filterEstado!=='Todos'||filterDesde||filterHasta
+  const limpiar=()=>{setFilterCampo('Todos');setFilterVehiculo('Todos');setFilterTipo('Todos');setFilterEstado('Todos');setFilterDesde('');setFilterHasta('')}
+
+  const exportCSV=()=>{
+    const header=['Fecha','No. Eco','Vehículo','Campo','Tipo','Descripción','Técnico','Estado','Mano de Obra','Refacciones','Total','Kilometraje','Observaciones']
+    const data=rows.map(m=>{
+      const veh=vehMap[m.vehiculo_id]
+      return [m.fecha,`#${veh?.no_economico||'?'}`,`"${veh?.nombre||veh?.marca||''}"`,veh?.campo||'',m.tipo,`"${m.descripcion||''}"`,m.tecnico||'',m.estado,m.mano_obra||0,m.refacciones||0,(+m.mano_obra||0)+(+m.refacciones||0),m.kilometraje||'',`"${m.observaciones||''}"`]
+    })
+    const totales=['','','','','','','','TOTALES',totalMO,totalRef,totalGeneral,'','']
+    const csv=[[...header],...data,[totales]].map(r=>r.join(',')).join('\n')
+    const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'})
+    const url=URL.createObjectURL(blob)
+    const a=document.createElement('a');a.href=url;a.download=`reporte_mantenimientos_${new Date().toISOString().split('T')[0]}.csv`;a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  const eColor={Completado:'success','En proceso':'warning',Pendiente:'info',Cancelado:'danger'}
+  const tColor={Preventivo:'info',Correctivo:'warning',Emergencia:'danger'}
+
+  return <div>
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
+      <div>
+        <h2 style={{fontSize:18,fontWeight:600,margin:'0 0 2px'}}>Reporte de Mantenimientos</h2>
+        <p style={{fontSize:12,color:'var(--text3)',margin:0}}>{rows.length} registros · M.O.: <strong style={{color:'#1D9E75'}}>${totalMO.toLocaleString()}</strong> · Ref.: <strong style={{color:'#D85A30'}}>${totalRef.toLocaleString()}</strong> · Total: <strong>${totalGeneral.toLocaleString()}</strong></p>
+      </div>
+      <div style={{display:'flex',gap:8}}>
+        <button onClick={()=>window.print()} style={{padding:'7px 14px',borderRadius:8,background:'#378ADD',color:'#fff',border:'none',fontSize:12,cursor:'pointer',fontWeight:500}}>🖨️ Imprimir / PDF</button>
+        <button onClick={exportCSV} style={{padding:'7px 14px',borderRadius:8,background:'#1D9E75',color:'#fff',border:'none',fontSize:12,cursor:'pointer',fontWeight:500}}>📥 Exportar Excel</button>
+      </div>
+    </div>
+
+    {/* Filtros */}
+    <div style={{background:'var(--bg)',border:'0.5px solid var(--border)',borderRadius:10,padding:'12px 14px',marginBottom:16,display:'flex',gap:10,flexWrap:'wrap',alignItems:'flex-end'}}>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Campo</label>
+        <select value={filterCampo} onChange={e=>{setFilterCampo(e.target.value);setFilterVehiculo('Todos')}} style={{width:'auto',padding:'6px 10px',fontSize:12}}>
+          <option>Todos</option>{CAMPOS.map(c=><option key={c}>{c}</option>)}
+        </select>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Vehículo</label>
+        <select value={filterVehiculo} onChange={e=>setFilterVehiculo(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}>
+          <option value="Todos">Todos</option>
+          {vehiculos.filter(v=>filterCampo==='Todos'||v.campo===filterCampo).map(v=><option key={v.id} value={String(v.id)}>#{v.no_economico} {v.nombre||v.marca}</option>)}
+        </select>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Tipo</label>
+        <select value={filterTipo} onChange={e=>setFilterTipo(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}>
+          <option>Todos</option>{TIPOS_MTTO.map(t=><option key={t}>{t}</option>)}
+        </select>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Estado</label>
+        <select value={filterEstado} onChange={e=>setFilterEstado(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}>
+          <option>Todos</option>{ESTADOS_MTTO.map(e=><option key={e}>{e}</option>)}
+        </select>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Desde</label>
+        <input type="date" value={filterDesde} onChange={e=>setFilterDesde(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}/>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:3}}>
+        <label style={{fontSize:11,color:'var(--text3)'}}>Hasta</label>
+        <input type="date" value={filterHasta} onChange={e=>setFilterHasta(e.target.value)} style={{width:'auto',padding:'6px 10px',fontSize:12}}/>
+      </div>
+      {hayFiltros&&<button onClick={limpiar} style={{alignSelf:'flex-end',padding:'6px 12px',borderRadius:6,border:'0.5px solid var(--border2)',background:'none',fontSize:12,cursor:'pointer',color:'var(--text2)'}}>✕ Limpiar</button>}
+    </div>
+
+    {/* Resumen de totales por tipo */}
+    {rows.length>0&&<div style={{display:'flex',gap:10,flexWrap:'wrap',marginBottom:16}}>
+      {['Preventivo','Correctivo','Emergencia'].map(tipo=>{
+        const tipoRows=rows.filter(m=>m.tipo===tipo)
+        if(tipoRows.length===0) return null
+        const tipoCosto=tipoRows.reduce((s,m)=>s+(+m.mano_obra||0)+(+m.refacciones||0),0)
+        return <div key={tipo} style={{background:'var(--bg)',border:'0.5px solid var(--border)',borderRadius:8,padding:'10px 14px',flex:1,minWidth:160}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+            <Badge color={tColor[tipo]||'gray'}>{tipo}</Badge>
+            <span style={{fontSize:11,color:'var(--text3)'}}>{tipoRows.length} registros</span>
+          </div>
+          <p style={{fontSize:18,fontWeight:700,margin:0,color:'#378ADD'}}>${tipoCosto.toLocaleString()}</p>
+        </div>
+      })}
+      <div style={{background:'#E1F5EE',border:'1.5px solid #1D9E75',borderRadius:8,padding:'10px 14px',flex:1,minWidth:160}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+          <span style={{fontSize:11,fontWeight:600,color:'#0F6E56'}}>TOTAL GENERAL</span>
+          <span style={{fontSize:11,color:'#1D9E75'}}>{rows.length} registros</span>
+        </div>
+        <p style={{fontSize:18,fontWeight:700,margin:0,color:'#1D9E75'}}>${totalGeneral.toLocaleString()}</p>
+      </div>
+    </div>}
+
+    {/* Tabla */}
+    {rows.length===0?<EmptyState msg="Sin mantenimientos con los filtros seleccionados."/>:
+    <div style={{overflowX:'auto'}}>
+      <table style={{width:'100%',borderCollapse:'collapse',fontSize:12}}>
+        <thead>
+          <tr style={{borderBottom:'0.5px solid var(--border)',background:'var(--bg2)'}}>
+            {['Fecha','No. Eco','Vehículo','Campo','Tipo','Descripción','Técnico','Estado','M. Obra','Refacc.','Total','Km'].map(h=>(
+              <th key={h} style={{padding:'8px 10px',textAlign:'left',fontWeight:500,color:'var(--text2)',whiteSpace:'nowrap'}}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map(m=>{
+            const veh=vehMap[m.vehiculo_id]
+            const total=(+m.mano_obra||0)+(+m.refacciones||0)
+            return <tr key={m.id} style={{borderBottom:'0.5px solid var(--border)'}}>
+              <td style={{padding:'8px 10px',whiteSpace:'nowrap'}}>{m.fecha}</td>
+              <td style={{padding:'8px 10px',fontWeight:700}}>#{veh?.no_economico||'?'}</td>
+              <td style={{padding:'8px 10px',fontSize:11,color:'var(--text2)',maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{veh?.nombre||veh?.marca||'—'}</td>
+              <td style={{padding:'8px 10px'}}><Badge color="gray">{veh?.campo?.split(' ')[0]||'—'}</Badge></td>
+              <td style={{padding:'8px 10px'}}><Badge color={tColor[m.tipo]||'gray'}>{m.tipo}</Badge></td>
+              <td style={{padding:'8px 10px',maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.descripcion}</td>
+              <td style={{padding:'8px 10px',fontSize:11,color:'var(--text2)'}}>{m.tecnico||'—'}</td>
+              <td style={{padding:'8px 10px'}}><Badge color={eColor[m.estado]||'gray'}>{m.estado}</Badge></td>
+              <td style={{padding:'8px 10px',color:'#1D9E75',fontWeight:500}}>${Number(m.mano_obra||0).toLocaleString()}</td>
+              <td style={{padding:'8px 10px',color:'#D85A30',fontWeight:500}}>${Number(m.refacciones||0).toLocaleString()}</td>
+              <td style={{padding:'8px 10px',fontWeight:700}}>${total.toLocaleString()}</td>
+              <td style={{padding:'8px 10px',color:'var(--text3)'}}>{m.kilometraje?Number(m.kilometraje).toLocaleString()+' km':'—'}</td>
+            </tr>
+          })}
+        </tbody>
+        <tfoot>
+          <tr style={{borderTop:'2px solid var(--border)',background:'var(--bg2)'}}>
+            <td colSpan={8} style={{padding:'8px 10px',fontWeight:700,fontSize:12}}>TOTALES ({rows.length} registros)</td>
+            <td style={{padding:'8px 10px',fontWeight:700,color:'#1D9E75'}}>${totalMO.toLocaleString()}</td>
+            <td style={{padding:'8px 10px',fontWeight:700,color:'#D85A30'}}>${totalRef.toLocaleString()}</td>
+            <td style={{padding:'8px 10px',fontWeight:700,color:'#378ADD'}}>${totalGeneral.toLocaleString()}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>}
+  </div>
+}
+
 /* ── Reporte de combustible ── */
 function ReporteCombustible({combustible,vehiculos}){
   const [filterVeh,setFilterVeh]=useState('Todos')
@@ -1469,6 +1633,7 @@ export default function App(){
       {page==='dashboard'&&<Dashboard vehiculos={vehiculos} mtto={mtto} combustible={combustible} viaticos={viaticos}/>}
       {page==='vehiculos'&&<Vehiculos vehiculos={vehiculos} setVehiculos={setVehiculos} mtto={mtto} combustible={combustible} viaticos={viaticos} loading={loading}/>}
       {page==='mtto'&&<Mantenimientos mtto={mtto} setMtto={setMtto} vehiculos={vehiculos} loading={loading}/>}
+        {page==='reporte_mtto'&&<ReporteMtto mtto={mtto} vehiculos={vehiculos}/>}
       {page==='combustible'&&<Combustible combustible={combustible} setCombustible={setCombustible} vehiculos={vehiculos} loading={loading}/>}
       {page==='presupuesto'&&<Presupuesto vehiculos={vehiculos} combustible={combustible} presupuestos={presupuestos} setPresupuestos={setPresupuestos} loading={loading}/>}
       {page==='reporte'&&<ReporteCombustible combustible={combustible} vehiculos={vehiculos}/>}
